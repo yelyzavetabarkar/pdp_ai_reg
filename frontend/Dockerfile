@@ -1,17 +1,37 @@
-FROM node:20-alpine
+# Build stage
+FROM node:20-alpine AS builder
 
-# Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Set pnpm store outside mounted volume
-ENV PNPM_HOME=/root/.local/share/pnpm
-ENV PNPM_STORE_DIR=/root/.local/share/pnpm/store
-
-# Set working directory
 WORKDIR /app
 
-# Expose Vite dev server port
-EXPOSE 5173
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies (allowing lockfile updates) and start dev server
-CMD ["sh", "-c", "pnpm install --no-frozen-lockfile && pnpm run dev --host 0.0.0.0"]
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source code
+COPY . .
+
+# Build argument for API URL
+ARG VITE_API_URL=http://localhost:8000
+ENV VITE_API_URL=$VITE_API_URL
+
+# Build the application
+RUN pnpm run build
+
+# Production stage
+FROM nginx:alpine
+
+# Copy custom nginx config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built files from builder
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Expose port
+EXPOSE 80
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

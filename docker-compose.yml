@@ -20,11 +20,11 @@ services:
       timeout: 5s
       retries: 5
 
-  # Laravel Backend
+  # Laravel Backend (Development)
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: app_backend
     restart: unless-stopped
     working_dir: /var/www/html
@@ -46,16 +46,17 @@ services:
     networks:
       - app_network
 
-  # React Frontend
+  # React Frontend (Development)
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: app_frontend
     restart: unless-stopped
     working_dir: /app
     volumes:
       - ./frontend:/app
+      - /app/node_modules
     ports:
       - "5173:5173"
     environment:
