@@ -1,0 +1,72 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: app_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-laravel}
+      POSTGRES_USER: ${DB_USERNAME:-laravel}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-laravel} -d ${DB_DATABASE:-laravel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Laravel Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: app_backend
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+      - /var/www/html/vendor
+    ports:
+      - "8000:8000"
+    environment:
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-laravel}
+      DB_USERNAME: ${DB_USERNAME:-laravel}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app_network
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: app_frontend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
