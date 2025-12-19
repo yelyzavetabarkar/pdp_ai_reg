@@ -1,0 +1,40 @@
+# Dependencies and lock files (large, auto-generated)
+node_modules/
+vendor/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+composer.lock
+
+# Build outputs (generated files)
+dist/
+build/
+.next/
+storage/framework/
+
+# Environment and secrets (security)
+.env
+.env.local
+.env.production
+*.pem
+*.key
+credentials.json
+
+# Caches and logs (not relevant for AI analysis)
+.cache/
+*.log
+storage/logs/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Docker volumes (large binary data)
+docker-data/
+postgres-data/
+
+# Test coverage (generated reports)
+coverage/
+.nyc_output/

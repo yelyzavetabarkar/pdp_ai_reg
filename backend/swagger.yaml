@@ -1,0 +1,112 @@
+openapi: 3.0.0
+info:
+  title: StayCorporate API
+  version: 1.0.0
+  description: API for corporate booking platform
+
+servers:
+  - url: http://localhost:8000/api
+
+paths:
+  /bookings:
+    get:
+      summary: Get bookings
+      responses:
+        200:
+          description: Success
+
+    post:
+      summary: Create booking
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Created
+
+  /bookings/{id}:
+    get:
+      summary: Get booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        200:
+          description: Success
+
+    put:
+      summary: Update booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        200:
+          description: Updated
+
+    delete:
+      summary: Delete booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        200:
+          description: Deleted
+
+  /bookings/export:
+    get:
+      summary: Export bookings
+      deprecated: true
+      responses:
+        200:
+          description: Success
+
+  /properties:
+    get:
+      summary: Get properties
+      responses:
+        200:
+          description: Success
+
+  /properties/{id}:
+    get:
+      summary: Get property details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        200:
+          description: Success
+
+  /properties/{id}/reviews:
+    get:
+      summary: Get reviews
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        200:
+          description: Success
+
+  /users:
+    get:
+      summary: Get users
+      responses:
+        200:
+          description: Success

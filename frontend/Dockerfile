@@ -3,20 +3,15 @@ FROM node:20-alpine
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
+# Set pnpm store outside mounted volume
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PNPM_STORE_DIR=/root/.local/share/pnpm/store
+
 # Set working directory
 WORKDIR /app
-
-# Copy package files
-COPY package.json pnpm-lock.yaml ./
-
-# Install dependencies
-RUN pnpm install --frozen-lockfile
-
-# Copy application files
-COPY . .
 
 # Expose Vite dev server port
 EXPOSE 5173
 
-# Start Vite development server
-CMD ["pnpm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Install dependencies (allowing lockfile updates) and start dev server
+CMD ["sh", "-c", "pnpm install --no-frozen-lockfile && pnpm run dev --host 0.0.0.0"]

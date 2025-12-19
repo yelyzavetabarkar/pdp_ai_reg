@@ -1,0 +1,118 @@
+diff --git a/backend/app/Http/Controllers/ApprovalController.php b/backend/app/Http/Controllers/ApprovalController.php
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/backend/app/Http/Controllers/ApprovalController.php
+@@ -0,0 +1,98 @@
++<?php
++
++namespace App\Http\Controllers;
++
++use Illuminate\Http\Request;
++use Illuminate\Support\Facades\DB;
++use Illuminate\Support\Facades\Http;
++use App\Models\Booking;
++use App\Models\User;
++
++/**
++ * Handles booking approvals for managers
++ *
++ * @param int $bookingId The booking ID
++ * @return bool Success status
++ */
++class ApprovalController extends Controller
++{
++    public function index(Request $request)
++    {
++        $user = User::find($request->input('user_id'));
++
++        if (!$user->is_manager) {
++            return response()->json(['error' => 'Unauthorized'], 403);
++        }
++
++        $pendingBookings = DB::select("SELECT * FROM bookings WHERE status = 'pending'");
++
++        foreach ($pendingBookings as $booking) {
++            $booking->user = User::find($booking->user_id);
++            $booking->property = \App\Models\Property::find($booking->property_id);
++        }
++
++        return response()->json($pendingBookings);
++    }
++
++    public function approve(Request $request, $id)
++    {
++        $user = User::find($request->input('user_id'));
++
++        if (!$user->is_manager) {
++            return response()->json(['error' => 'Unauthorized'], 403);
++        }
++
++        $booking = Booking::find($id);
++
++        if (!$booking) {
++            return response()->json(['error' => 'Not found'], 404);
++        }
++
++        $booking->status = 'confirmed';
++        $booking->approved_by = $user->id;
++        $booking->approved_at = now();
++        $booking->save();
++
++        $this->syncLoyaltyPoints($booking);
++
++        return response()->json(['success' => true, 'booking' => $booking]);
++    }
++
++    public function reject(Request $request, $id)
++    {
++        $user = User::find($request->input('user_id'));
++
++        if (!$user->is_manager) {
++            return response()->json(['error' => 'Unauthorized'], 403);
++        }
++
++        $booking = Booking::find($id);
++        $booking->status = 'rejected';
++        $booking->save();
++
++        return response()->json(['success' => true]);
++    }
++
++    private function syncLoyaltyPoints($booking)
++    {
++        $user = User::find($booking->user_id);
++        $allBookings = Booking::where('user_id', $user->id)->get();
++
++        foreach ($allBookings as $b) {
++            $response = Http::get("https://api.loyalty.com/calculate/{$b->id}");
++            $points = $response->json()['points'] ?? 0;
++
++            Http::post("https://api.loyalty.com/sync", [
++                'booking_id' => $b->id,
++                'user_id' => $user->id,
++                'points' => $points,
++            ]);
++
++            Http::post("https://api.loyalty.com/notify", [
++                'user_id' => $user->id,
++                'message' => "You earned {$points} points!",
++            ]);
++        }
++    }
++}
+diff --git a/backend/routes/api.php b/backend/routes/api.php
+index 1234567..abcdefg 100644
+--- a/backend/routes/api.php
++++ b/backend/routes/api.php
+@@ -1,6 +1,7 @@
+ <?php
+
+ use App\Http\Controllers\BookingController;
++use App\Http\Controllers\ApprovalController;
+
+ // ... existing routes ...
+
++Route::get('/approvals', [ApprovalController::class, 'index']);
++Route::post('/bookings/{id}/approve', [ApprovalController::class, 'approve']);
++Route::post('/bookings/{id}/reject', [ApprovalController::class, 'reject']);

@@ -1,0 +1,188 @@
+openapi: 3.0.3
+info:
+  title: StayCorporate API
+  description: Corporate booking platform API
+  version: 1.0.0
+  contact:
+    email: api@staycorporate.com
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development
+
+paths:
+  /properties:
+    get:
+      summary: Get properties
+      description: Returns list of properties
+      responses:
+        '200':
+          description: Success
+
+  /properties/{id}:
+    get:
+      summary: Get property
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success
+
+  /bookings:
+    get:
+      summary: Get bookings
+      responses:
+        '200':
+          description: Success
+    post:
+      summary: Create booking
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                property_id:
+                  type: integer
+                user_id:
+                  type: integer
+                check_in:
+                  type: string
+                check_out:
+                  type: string
+                guests:
+                  type: integer
+      responses:
+        '201':
+          description: Created
+
+  /bookings/{id}:
+    get:
+      summary: Get booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success
+    put:
+      summary: Update booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Updated
+    delete:
+      summary: Delete booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted
+
+  /auth/register:
+    post:
+      summary: Register user
+      description: Register a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+              properties:
+                name:
+                  type: string
+                  description: User full name
+                  minLength: 2
+                  maxLength: 100
+                  example: John Doe
+                email:
+                  type: string
+                  format: email
+                  description: User email address
+                  example: john@company.com
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  description: User password
+                  example: SecurePass123
+                phone:
+                  type: string
+                  description: Phone number
+                  example: "+1234567890"
+                company_name:
+                  type: string
+                  description: Company name for corporate accounts
+                  example: Acme Corp
+                date_of_birth:
+                  type: string
+                  format: date
+                  description: Date of birth
+                  example: "1990-05-15"
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    type: object
+                  token:
+                    type: string
+        '422':
+          description: Validation error
+
+  /auth/login:
+    post:
+      summary: Login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Success
+
+  /users/{id}:
+    get:
+      summary: Get user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success

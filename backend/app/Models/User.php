@@ -2,47 +2,73 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\DB;
+use App\Models\Favorite;
 
 class User extends Authenticatable
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory, Notifiable;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
     protected $fillable = [
         'name',
         'email',
         'password',
+        'company_id',
+        'company_tier',
+        'is_manager',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    public function getBookings()
+    {
+        return Booking::where('user_id', $this->id)->get();
+    }
+
+    public function getCompany()
+    {
+        return DB::select("SELECT * FROM companies WHERE id = {$this->company_id}")[0] ?? null;
+    }
+
+    public function getDiscount()
+    {
+        if ($this->company_tier == 'gold') {
+            return 0.20;
+        } else if ($this->company_tier == 'silver') {
+            return 0.15;
+        } else if ($this->company_tier == 'bronze') {
+            return 0.10;
+        } else {
+            return 0;
+        }
+    }
+
+    public function isManager()
+    {
+        return $this->is_manager == 1;
+    }
+
+    public function getFullName()
+    {
+        return $this->name;
+    }
+
+    public function favorites()
+    {
+        return $this->hasMany(Favorite::class);
     }
 }
