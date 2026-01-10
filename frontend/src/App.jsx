@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useLayoutEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import axios from "axios";
+import { SWRConfig } from "swr";
 import { Toaster } from "sonner";
 import { AnimatePresence, motion } from "framer-motion";
 import useAppStore from "./stores/use-app-store";
+import { swrConfig } from "./hooks/use-swr-config";
+import { useFavorites } from "./hooks/use-api";
 import Header from "./components/header";
 import PropertyList from "./pages/property-list";
 import PropertyDetails from "./pages/property-details";
@@ -17,6 +20,22 @@ import Signup from "./pages/signup";
 
 axios.defaults.baseURL =
   import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+function FavoritesSync({ userId }) {
+  const setFavorites = useAppStore((state) => state.setFavorites);
+  const { favorites } = useFavorites(userId);
+
+  useEffect(() => {
+    if (favorites && userId) {
+      const favoriteIds = favorites.map((favorite) => favorite.property_id ?? favorite.id);
+      setFavorites(favoriteIds);
+    } else if (!userId) {
+      setFavorites([]);
+    }
+  }, [favorites, userId, setFavorites]);
+
+  return null;
+}
 
 const getInitialTheme = () => {
   if (typeof window === "undefined") {
@@ -34,7 +53,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   const store = useAppStore();
-  const setFavorites = store.setFavorites;
 
   useEffect(() => {
     loadUserFromStorage();
@@ -52,25 +70,6 @@ export default function App() {
       localStorage.setItem('notifications', JSON.stringify(notifications));
     }
   }, [notifications, user]);
-
-  useEffect(() => {
-    const fetchFavorites = async (userId) => {
-      try {
-        const response = await axios.get(`/api/favorites/user/${userId}`);
-        const data = response.data.data || response.data || [];
-        const favoriteIds = data.map((favorite) => favorite.property_id ?? favorite.id);
-        setFavorites(favoriteIds);
-      } catch (err) {
-        console.log("Error loading favorites:", err);
-      }
-    };
-
-    if (user?.id) {
-      fetchFavorites(user.id);
-    } else {
-      setFavorites([]);
-    }
-  }, [user?.id, setFavorites]);
 
   const loadUserFromStorage = () => {
     try {
@@ -170,21 +169,24 @@ export default function App() {
   }
 
   return (
-    <BrowserRouter>
-      <AppShell
-        user={user}
-        settings={settings}
-        theme={theme}
-        setTheme={setTheme}
-        notifications={notifications}
-        company={company}
-        onLogout={handleLogout}
-        onLogin={handleLogin}
-        onUpdateUser={handleUpdateUser}
-        onMarkNotificationRead={handleMarkNotificationRead}
-        onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
-      />
-    </BrowserRouter>
+    <SWRConfig value={swrConfig}>
+      <BrowserRouter>
+        <FavoritesSync userId={user?.id} />
+        <AppShell
+          user={user}
+          settings={settings}
+          theme={theme}
+          setTheme={setTheme}
+          notifications={notifications}
+          company={company}
+          onLogout={handleLogout}
+          onLogin={handleLogin}
+          onUpdateUser={handleUpdateUser}
+          onMarkNotificationRead={handleMarkNotificationRead}
+          onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+        />
+      </BrowserRouter>
+    </SWRConfig>
   );
 }
 

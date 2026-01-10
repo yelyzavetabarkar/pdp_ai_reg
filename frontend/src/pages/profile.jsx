@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { useUser, useUserProfileBookings, useBookings } from '../hooks/use-api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,73 +14,32 @@ import {
 export default function Profile({ user, settings, theme, onLogout, notifications, company }) {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [profileData, setProfileData] = useState(null);
-  const [bookings, setBookings] = useState([]);
-  const [reviews, setReviews] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({});
 
   const userId = id || user?.id;
 
-  useEffect(() => {
-    if (userId) {
-      fetchProfileData();
-    }
-  }, [userId]);
+  const { user: profileData, isLoading: profileLoading } = useUser(userId);
+  const { bookings, isLoading: bookingsLoading } = useUserProfileBookings(userId);
+  const { bookings: allBookings } = useBookings();
 
-  useEffect(() => {
-    if (userId) {
-      fetchBookings();
-    }
-  }, [userId]);
+  const loading = profileLoading;
 
-  useEffect(() => {
-    if (userId) {
-      fetchReviews();
-    }
-  }, [userId]);
+  const reviews = useMemo(() => {
+    if (!allBookings || !userId) return [];
+    return allBookings.filter(b => b.user_id == userId).slice(0, 5);
+  }, [allBookings, userId]);
 
-  useEffect(() => {
-    if (bookings.length > 0) {
-      calculateStats();
+  const stats = useMemo(() => {
+    if (!bookings || bookings.length === 0) {
+      return {
+        totalBookings: 0,
+        totalSpent: 0,
+        totalNights: 0,
+        citiesVisited: 0,
+      };
     }
-  }, [bookings]);
 
-  const fetchProfileData = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`/api/users/${userId}`);
-      setProfileData(response.data);
-    } catch (err) {
-      console.log('Error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchBookings = async () => {
-    try {
-      const response = await axios.get(`/api/users/${userId}/bookings`);
-      setBookings(response.data || []);
-    } catch (err) {
-      console.log('Error fetching bookings:', err);
-    }
-  };
-
-  const fetchReviews = async () => {
-    try {
-      const response = await axios.get(`/api/bookings`);
-      const userBookings = response.data.filter(b => b.user_id == userId);
-      setReviews(userBookings.slice(0, 5));
-    } catch (err) {
-      console.log('Error:', err);
-    }
-  };
-
-  const calculateStats = () => {
     let totalSpent = 0;
     let totalNights = 0;
-    let citiesVisited = [];
 
     for (let i = 0; i < bookings.length; i++) {
       const booking = bookings[i];
@@ -94,13 +53,13 @@ export default function Profile({ user, settings, theme, onLogout, notifications
       }
     }
 
-    setStats({
+    return {
       totalBookings: bookings.length,
       totalSpent: totalSpent,
       totalNights: totalNights,
-      citiesVisited: citiesVisited.length,
-    });
-  };
+      citiesVisited: 0,
+    };
+  }, [bookings]);
 
   const getInitials = (name) => {
     if (!name) return 'U';

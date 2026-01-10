@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback, memo } from "react";
+import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import axios from "axios";
 import useAppStore from "../stores/use-app-store";
+import { useProperties, useCuratedProperties } from "../hooks/use-api";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -314,9 +314,7 @@ export default function PropertyList({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [properties, setProperties] = useState([]);
   const [displayedProperties, setDisplayedProperties] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(1);
@@ -329,9 +327,17 @@ export default function PropertyList({
   const loadMoreRef = useRef(null);
   const store = useAppStore();
 
+  const { properties: allProperties, isLoading: propertiesLoading } = useProperties();
+  const { properties: curatedProperties, isLoading: curatedLoading } = useCuratedProperties();
+
+  const loading = activeCategory === "curated" ? curatedLoading : propertiesLoading;
+  const properties = allProperties;
+
   useEffect(() => {
-    fetchProperties();
-  }, []);
+    if (properties.length > 0) {
+      store.setProperties(properties);
+    }
+  }, [properties, store]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -344,34 +350,43 @@ export default function PropertyList({
     }
   }, [location.search]);
 
-  const loadCuratedProperties = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await axios.get("/api/properties/curated");
-      const curated =
-        response.data?.data && Array.isArray(response.data.data)
-          ? response.data.data
-          : Array.isArray(response.data)
-            ? response.data
-            : [];
-      setDisplayedProperties(curated);
-      setHasMore(false);
-      setPage(1);
-    } catch (err) {
-      console.log("Error fetching curated properties:", err);
-      setDisplayedProperties([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const handleCuratedNavigate = useCallback(() => {
     navigate("/properties?category=curated");
   }, [navigate]);
 
+  const filterProperties = useCallback((props) => {
+    return props.filter((property) => {
+      if (selectedCity !== "all" && property.city !== selectedCity)
+        return false;
+      if (
+        searchQuery &&
+        !property.name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+        return false;
+      if (priceFilter === "low" && property.price_per_night > 200) return false;
+      if (
+        priceFilter === "mid" &&
+        (property.price_per_night < 200 || property.price_per_night > 300)
+      )
+        return false;
+      if (priceFilter === "high" && property.price_per_night < 300)
+        return false;
+      if (
+        activeCategory === "trending" &&
+        parseFloat(property.average_rating) < 4.5
+      )
+        return false;
+      if (activeCategory === "deals" && property.price_per_night > 150)
+        return false;
+      return true;
+    });
+  }, [selectedCity, searchQuery, priceFilter, activeCategory]);
+
   useEffect(() => {
     if (activeCategory === "curated") {
-      loadCuratedProperties();
+      setDisplayedProperties(curatedProperties);
+      setHasMore(false);
+      setPage(1);
       return;
     }
 
@@ -387,7 +402,8 @@ export default function PropertyList({
     priceFilter,
     activeCategory,
     properties,
-    loadCuratedProperties,
+    curatedProperties,
+    filterProperties,
   ]);
 
   useEffect(() => {
@@ -417,49 +433,6 @@ export default function PropertyList({
     };
   }, [hasMore, loadingMore, loading, displayedProperties, activeCategory]);
 
-  const fetchProperties = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get("/api/properties");
-      setProperties(response.data);
-      store.setProperties(response.data);
-      setDisplayedProperties(response.data.slice(0, ITEMS_PER_PAGE));
-      setHasMore(response.data.length > ITEMS_PER_PAGE);
-    } catch (err) {
-      console.log("Error:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const filterProperties = (props) => {
-    return props.filter((property) => {
-      if (selectedCity !== "all" && property.city !== selectedCity)
-        return false;
-      if (
-        searchQuery &&
-        !property.name.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-        return false;
-      if (priceFilter === "low" && property.price_per_night > 200) return false;
-      if (
-        priceFilter === "mid" &&
-        (property.price_per_night < 200 || property.price_per_night > 300)
-      )
-        return false;
-      if (priceFilter === "high" && property.price_per_night < 300)
-        return false;
-      if (
-        activeCategory === "trending" &&
-        parseFloat(property.average_rating) < 4.5
-      )
-        return false;
-      if (activeCategory === "deals" && property.price_per_night > 150)
-        return false;
-      return true;
-    });
-  };
-
   const loadMoreProperties = useCallback(() => {
     if (loadingMore || activeCategory === "curated") return;
 
@@ -485,10 +458,8 @@ export default function PropertyList({
     page,
     properties,
     loadingMore,
-    searchQuery,
-    selectedCity,
-    priceFilter,
     activeCategory,
+    filterProperties,
   ]);
 
   const toggleFavorite = (propertyId) => {

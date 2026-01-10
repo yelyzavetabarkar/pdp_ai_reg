@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import axios from 'axios';
+import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import useAppStore from '../stores/use-app-store';
+import { useFavorites } from '../hooks/use-api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -90,43 +90,22 @@ const SavedPropertyCard = ({ property, onToggleFavorite }) => (
 );
 
 export default function SavedProperties({ user }) {
-  const favorites = useAppStore((state) => state.favorites);
+  const storeFavorites = useAppStore((state) => state.favorites);
   const toggleFavorite = useAppStore((state) => state.toggleFavorite);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [favoriteProperties, setFavoriteProperties] = useState([]);
+  const { favorites: rawFavorites, isLoading: loading, isError, mutate } = useFavorites(user?.id);
+  const error = isError ? 'Failed to load saved properties. Please try again.' : null;
 
-  const loadFavorites = useCallback(async () => {
-    if (!user?.id) return;
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await axios.get(`/api/favorites/user/${user.id}`);
-      const data = response.data.data || response.data || [];
-      const normalized = data
-        .map((fav) => fav.property || null)
-        .filter(Boolean);
-      setFavoriteProperties(normalized);
-    } catch (err) {
-      setError('Failed to load saved properties. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (user?.id) {
-      loadFavorites();
-    } else {
-      setFavoriteProperties([]);
-      setLoading(false);
-    }
-  }, [user?.id, loadFavorites]);
+  const favoriteProperties = useMemo(() => {
+    if (!rawFavorites) return [];
+    return rawFavorites
+      .map((fav) => fav.property || null)
+      .filter(Boolean);
+  }, [rawFavorites]);
 
   const handleToggleFavorite = async (propertyId) => {
     await toggleFavorite(propertyId);
-    setFavoriteProperties((prev) => prev.filter((property) => property.id !== propertyId));
+    mutate();
   };
 
   if (!user) {
@@ -167,7 +146,7 @@ export default function SavedProperties({ user }) {
           ))}
         </div>
       ) : favoriteProperties.length === 0 ? (
-        <EmptyState hasFavorites={favorites.length > 0} />
+        <EmptyState hasFavorites={storeFavorites.length > 0} />
       ) : (
         <div className="space-y-4">
           {favoriteProperties.map((property) => (

@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import _ from 'lodash';
 import { format, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
-import * as Utils from '../utils/helpers';
 import useAppStore from '../stores/use-app-store';
+import { useProperty, usePropertyReviews, useAvailability, useCreateBooking, useCreateReview } from '../hooks/use-api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -37,13 +36,21 @@ export default function PropertyDetails({ user, settings, theme, onLogout, notif
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [property, setProperty] = useState(null);
-  const [reviews, setReviews] = useState([]);
-  const [availability, setAvailability] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [reviewsLoading, setReviewsLoading] = useState(false);
-  const [availabilityLoading, setAvailabilityLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const { property, isLoading: loading, isError } = useProperty(id);
+  const { reviews: rawReviews, isLoading: reviewsLoading, mutate: mutateReviews } = usePropertyReviews(id);
+  const { availability, isLoading: availabilityLoading } = useAvailability(id);
+  const { createBooking } = useCreateBooking();
+  const { createReview: submitReview } = useCreateReview(id);
+
+  const reviews = sortReviewsNewestFirst(
+    (Array.isArray(rawReviews) ? rawReviews : []).map((review) => ({
+      ...review,
+      user: review.user || (review.user_name ? { name: review.user_name } : undefined),
+    }))
+  );
+
+  const error = isError ? 'Failed to load property' : null;
+
   const [checkIn, setCheckIn] = useState('');
   const [checkOut, setCheckOut] = useState('');
   const [guests, setGuests] = useState('2');
@@ -64,16 +71,10 @@ export default function PropertyDetails({ user, settings, theme, onLogout, notif
   const reviewsSectionRef = useRef(null);
 
   useEffect(() => {
-    fetchProperty();
-    const interval = setInterval(pollAvailability, 30000);
-    window.addEventListener('resize', handleResize);
-  }, []);
-
-  useEffect(() => {
     if (property) {
-      fetchReviews();
+      store.addRecentlyViewed(id);
     }
-  }, [property]);
+  }, [property, id, store]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -87,70 +88,10 @@ export default function PropertyDetails({ user, settings, theme, onLogout, notif
   }, [location.search]);
 
   useEffect(() => {
-    if (reviews.length > 0) {
-      fetchAvailability();
-    }
-  }, [reviews]);
-
-  useEffect(() => {
     if (checkIn && checkOut && property) {
       calculatePrice();
     }
-  }, [checkIn, checkOut, guests]);
-
-  const handleResize = () => {
-    console.log('Window resized');
-  };
-
-  const pollAvailability = () => {
-    if (property) {
-      fetchAvailability();
-    }
-  };
-
-  const fetchProperty = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`/api/properties/${id}`);
-      const data = response.data.data || response.data;
-      setProperty(data);
-      store.addRecentlyViewed(id);
-    } catch (err) {
-      setError('Failed to load property');
-      console.log('Error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchReviews = async () => {
-    try {
-      setReviewsLoading(true);
-      const response = await axios.get(`/api/properties/${id}/reviews`);
-      const data = response.data.data || response.data || [];
-      const normalized = (Array.isArray(data) ? data : []).map((review) => ({
-        ...review,
-        user: review.user || (review.user_name ? { name: review.user_name } : undefined),
-      }));
-      setReviews(sortReviewsNewestFirst(normalized));
-    } catch (err) {
-      console.log('Error fetching reviews:', err);
-    } finally {
-      setReviewsLoading(false);
-    }
-  };
-
-  const fetchAvailability = async () => {
-    try {
-      setAvailabilityLoading(true);
-      const response = await axios.get(`/api/bookings/availability/${id}`);
-      setAvailability(response.data);
-    } catch (err) {
-      console.log('Error:', err);
-    } finally {
-      setAvailabilityLoading(false);
-    }
-  };
+  }, [checkIn, checkOut, guests, property]);
 
   const calculatePrice = async () => {
     try {
@@ -190,7 +131,7 @@ export default function PropertyDetails({ user, settings, theme, onLogout, notif
 
     setIsSubmitting(true);
     try {
-      const response = await axios.post('/api/bookings', {
+      const response = await createBooking({
         property_id: id,
         user_id: user.id,
         check_in: checkIn,
@@ -198,8 +139,8 @@ export default function PropertyDetails({ user, settings, theme, onLogout, notif
         guests: parseInt(guests),
       });
 
-      if (response.data.success) {
-        store.addBooking(response.data.booking);
+      if (response.success) {
+        store.addBooking(response.booking);
         setShowModal(true);
       }
     } catch (err) {
@@ -216,14 +157,14 @@ export default function PropertyDetails({ user, settings, theme, onLogout, notif
     setIsReviewSubmitting(true);
 
     try {
-      const response = await axios.post(`/api/properties/${id}/reviews`, {
+      const response = await submitReview({
         user_id: user.id,
         rating: parseInt(newReview.rating),
         comment: newReview.comment,
       });
 
-      if (response.data.success) {
-        const serverReview = response.data.review || {};
+      if (response.success) {
+        const serverReview = response.review || {};
         const normalizedReview = {
           ...serverReview,
           rating: serverReview.rating ?? parseInt(newReview.rating),
@@ -237,7 +178,7 @@ export default function PropertyDetails({ user, settings, theme, onLogout, notif
         };
 
         store.addReview(normalizedReview);
-        setReviews((prev) => sortReviewsNewestFirst([normalizedReview, ...prev]));
+        mutateReviews();
         setNewReview({ rating: '5', comment: '' });
         setActiveTab('reviews');
         setShowAllReviews(true);

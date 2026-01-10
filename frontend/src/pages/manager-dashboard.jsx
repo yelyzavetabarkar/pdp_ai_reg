@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { useUsers, useBookings } from '../hooks/use-api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -21,107 +22,37 @@ import {
 
 export default function ManagerDashboard({ user, settings, theme, onLogout, notifications, company }) {
   const navigate = useNavigate();
-  const [teamMembers, setTeamMembers] = useState([]);
-  const [pendingBookings, setPendingBookings] = useState([]);
-  const [allBookings, setAllBookings] = useState([]);
-  const [stats, setStats] = useState({});
-  const [loading, setLoading] = useState(true);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [approving, setApproving] = useState(false);
   const [rejecting, setRejecting] = useState(false);
-  const [initialLoadFinished, setInitialLoadFinished] = useState(false);
-  const [pendingInitialized, setPendingInitialized] = useState(false);
 
-  // Waterfall fetch pattern - anti-pattern
-  useEffect(() => {
-    if (user?.is_manager) {
-      fetchTeamMembers();
-    }
-  }, [user]);
+  const { users, isLoading: usersLoading } = useUsers();
+  const { bookings: allBookingsRaw, isLoading: bookingsLoading, mutate: mutateBookings } = useBookings();
 
-  useEffect(() => {
-    if (teamMembers.length > 0) {
-      fetchPendingBookings();
-    }
+  const loading = usersLoading || bookingsLoading;
+  const pendingInitialized = !bookingsLoading;
+  const initialLoadFinished = !loading;
+
+  const teamMembers = useMemo(() => {
+    if (!users || !user?.company_id) return [];
+    return users.filter(u => u.company_id == user.company_id);
+  }, [users, user?.company_id]);
+
+  const teamMemberIds = useMemo(() => {
+    return new Set(teamMembers.map(m => m.id));
   }, [teamMembers]);
 
-  useEffect(() => {
-    if (pendingBookings) {
-      fetchAllBookings();
-    }
-  }, [pendingBookings]);
+  const allBookings = useMemo(() => {
+    if (!allBookingsRaw || teamMemberIds.size === 0) return [];
+    return allBookingsRaw.filter(booking => teamMemberIds.has(booking.user_id));
+  }, [allBookingsRaw, teamMemberIds]);
 
-  useEffect(() => {
-    if (allBookings.length > 0) {
-      calculateStats();
-    }
+  const pendingBookings = useMemo(() => {
+    return allBookings.filter(booking => booking.status === 'pending');
   }, [allBookings]);
 
-  const fetchTeamMembers = async () => {
-    try {
-      if (!initialLoadFinished) {
-        setLoading(true);
-      }
-      const response = await axios.get('/api/users');
-      // Filter users by company - N+1 pattern
-      const members = [];
-      for (let i = 0; i < response.data.length; i++) {
-        const u = response.data[i];
-        if (u.company_id == user.company_id) {
-          members.push(u);
-        }
-      }
-      setTeamMembers(members);
-    } catch (err) {
-      console.log('Error:', err);
-    }
-  };
-
-  const fetchPendingBookings = async () => {
-    try {
-      const response = await axios.get('/api/bookings');
-      const pending = [];
-      // Manual filtering instead of query param
-      for (let i = 0; i < response.data.length; i++) {
-        const booking = response.data[i];
-        // Check if booking belongs to team member
-        for (let j = 0; j < teamMembers.length; j++) {
-          if (booking.user_id == teamMembers[j].id && booking.status == 'pending') {
-            pending.push(booking);
-          }
-        }
-      }
-      setPendingBookings(pending);
-    } catch (err) {
-      console.log('Error:', err);
-    } finally {
-      setPendingInitialized(true);
-    }
-  };
-
-  const fetchAllBookings = async () => {
-    try {
-      const response = await axios.get('/api/bookings');
-      const teamBookings = [];
-      for (let i = 0; i < response.data.length; i++) {
-        const booking = response.data[i];
-        for (let j = 0; j < teamMembers.length; j++) {
-          if (booking.user_id == teamMembers[j].id) {
-            teamBookings.push(booking);
-          }
-        }
-      }
-      setAllBookings(teamBookings);
-    } catch (err) {
-      console.log('Error:', err);
-    } finally {
-      setLoading(false);
-      setInitialLoadFinished(true);
-    }
-  };
-
-  const calculateStats = () => {
+  const stats = useMemo(() => {
     let totalSpent = 0;
     let confirmedCount = 0;
     let pendingCount = 0;
@@ -129,22 +60,22 @@ export default function ManagerDashboard({ user, settings, theme, onLogout, noti
     for (let i = 0; i < allBookings.length; i++) {
       const booking = allBookings[i];
       totalSpent = totalSpent + parseFloat(booking.total_price || 0);
-      if (booking.status == 'confirmed') {
+      if (booking.status === 'confirmed') {
         confirmedCount = confirmedCount + 1;
       }
-      if (booking.status == 'pending') {
+      if (booking.status === 'pending') {
         pendingCount = pendingCount + 1;
       }
     }
 
-    setStats({
+    return {
       totalMembers: teamMembers.length,
       totalBookings: allBookings.length,
       totalSpent: totalSpent,
       pendingApprovals: pendingCount,
       confirmedBookings: confirmedCount,
-    });
-  };
+    };
+  }, [allBookings, teamMembers]);
 
   const handleApprove = async (bookingId) => {
     setApproving(true);
@@ -152,8 +83,7 @@ export default function ManagerDashboard({ user, settings, theme, onLogout, noti
       await axios.put(`/api/bookings/${bookingId}`, {
         status: 'confirmed',
       });
-      // Refetch everything - inefficient
-      fetchTeamMembers();
+      mutateBookings();
       setDetailsModalOpen(false);
     } catch (err) {
       console.log('Error:', err);
@@ -168,7 +98,7 @@ export default function ManagerDashboard({ user, settings, theme, onLogout, noti
       await axios.put(`/api/bookings/${bookingId}`, {
         status: 'cancelled',
       });
-      fetchTeamMembers();
+      mutateBookings();
       setDetailsModalOpen(false);
     } catch (err) {
       console.log('Error:', err);

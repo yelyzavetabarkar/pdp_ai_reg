@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { format, isPast, isFuture, differenceInDays } from 'date-fns';
 import useAppStore from '../stores/use-app-store';
+import { useUserBookings } from '../hooks/use-api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -39,71 +40,21 @@ const getBookingNights = (checkInDate, checkOutDate) => {
 };
 
 export default function BookingList({ user, settings, theme, onLogout, notifications, company }) {
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [error, setError] = useState(null);
 
   const setBookingsInStore = useAppStore((state) => state.setBookings);
   const removeBookingFromStore = useAppStore((state) => state.removeBooking);
 
-  const controllerRef = useRef(null);
-  const isMountedRef = useRef(true);
+  const { bookings, isLoading: loading, isError, mutate } = useUserBookings(user?.id);
+  const error = isError ? 'Unable to load your trips right now. Please try again.' : null;
 
-  const loadBookings = useCallback(async () => {
-    if (!user?.id) return;
-
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    controllerRef.current = controller;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await axios.get(`/api/bookings/user/${user.id}`, {
-        signal: controller.signal,
-      });
-      const rawData = response?.data?.data ?? response?.data ?? [];
-      const sanitizedData = Array.isArray(rawData) ? rawData : [];
-
-      if (!isMountedRef.current || controller.signal.aborted) return;
-
-      setBookings(sanitizedData);
-      setBookingsInStore(sanitizedData);
-    } catch (err) {
-      if (controller.signal.aborted || axios.isCancel(err) || err?.code === 'ERR_CANCELED') {
-        return;
-      }
-
-      console.log('Error loading bookings:', err);
-
-      if (!isMountedRef.current) return;
-
-      setError('Unable to load your trips right now. Please try again.');
-      setBookings([]);
-    } finally {
-      if (isMountedRef.current && !controller.signal.aborted) {
-        setLoading(false);
-      }
+  React.useEffect(() => {
+    if (bookings.length > 0) {
+      setBookingsInStore(bookings);
     }
-  }, [user?.id, setBookingsInStore]);
-
-  useEffect(() => {
-    if (user) {
-      loadBookings();
-    }
-  }, [user, loadBookings]);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      controllerRef.current?.abort();
-    };
-  }, []);
+  }, [bookings, setBookingsInStore]);
 
   const handleCancelBooking = async () => {
     if (!selectedBooking) return;
@@ -111,8 +62,8 @@ export default function BookingList({ user, settings, theme, onLogout, notificat
     setIsCancelling(true);
     try {
       await axios.delete(`/api/bookings/${selectedBooking.id}`);
-      setBookings((current) => current.filter(b => b.id !== selectedBooking.id));
       removeBookingFromStore(selectedBooking.id);
+      mutate();
       setCancelModalOpen(false);
       setSelectedBooking(null);
       toast.success('Booking cancelled', {
@@ -130,7 +81,7 @@ export default function BookingList({ user, settings, theme, onLogout, notificat
 
   const handleRetry = () => {
     if (!loading) {
-      loadBookings();
+      mutate();
     }
   };
 
