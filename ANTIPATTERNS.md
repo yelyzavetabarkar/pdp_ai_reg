@@ -2,26 +2,27 @@
 
 A comprehensive list of intentional anti-patterns included in this codebase for the refactoring workshop.
 
+> **Note:** The backend uses a clean architecture structure (`src/` with Application, Domain, Infrastructure, Presentation layers), but the anti-patterns are intentionally preserved and distributed across these layers - making them more nuanced and realistic to discover.
+
 ---
 
 ## Backend Anti-Patterns
 
-### 1. God Controller (`BookingController.php`)
+### 1. God Action (`CreateBookingAction.php`)
 
-**Location:** `backend/app/Http/Controllers/BookingController.php`
-**Lines:** 400+
+**Location:** `backend/src/Application/Booking/Actions/ApiVersion1/CreateBookingAction.php`
+**Lines:** 200+
 
 **Issues:**
 
-- 400+ lines in a single controller
+- 200+ lines in a single Action class
 - Business logic mixed with data access
-- No service layer extraction
-- Pricing calculations inline (lines 92-165)
+- Pricing calculations inline
 - 10+ nested if/else for pricing logic
-- Copy-pasted validation across methods
+- Dead methods included (`handleClick2`, `doStuff`, `temp`)
 
 ```php
-// Nested if/else pyramid - lines 97-117
+// Nested if/else pyramid
 if ($companyTier == 'gold') {
     $discount = 0.20;
 } else {
@@ -37,7 +38,7 @@ if ($companyTier == 'gold') {
 
 ### 2. N+1 Query Problems
 
-**Location:** `backend/app/Http/Controllers/BookingController.php:28-35`
+**Location:** `backend/src/Domain/Booking/Eloquent/BookingReadEloquent.php:27-40`
 
 ```php
 foreach ($bookings as $booking) {
@@ -49,19 +50,16 @@ foreach ($bookings as $booking) {
 
 **Also in:**
 
-- `PropertyController.php:16-24` (index method)
-- `PropertyController.php:119-129` (search method)
-- `PropertyController.php:138-141` (getReviews method)
+- `GetAllPropertiesAction.php` (Property Actions)
+- `SearchPropertiesAction.php`
+- `GetPropertyReviewsAction.php`
 
 ### 3. Raw SQL Injection Vulnerabilities (Educational)
 
-**Location:** `backend/app/Http/Controllers/PropertyController.php`
+**Location:** `backend/src/Domain/Property/Eloquent/PropertyReadEloquent.php`
 
 ```php
-// Line 37 - Direct variable interpolation
-$reviews = DB::select("SELECT * FROM reviews WHERE property_id = {$id}");
-
-// Line 103-115 - Building queries with string concatenation
+// search method - Building queries with string concatenation
 $query = "SELECT * FROM properties WHERE 1=1";
 if ($city) {
     $query .= " AND city = '{$city}'";  // SQL injection possible
@@ -70,50 +68,51 @@ if ($city) {
 
 **Also in:**
 
-- `BookingController.php:167` - availability check
-- `BookingController.php:264` - getByUser
-- `BookingController.php:285` - getByProperty
+- `backend/src/Domain/User/Models/User.php:44` - getCompany()
+- `backend/src/Domain/Property/Models/Property.php` - getAverageRating(), isAvailable()
+- `backend/src/Domain/Booking/Models/Booking.php:58` - getReviews()
+- `backend/src/Application/Booking/Actions/ApiVersion1/CreateBookingAction.php` - availability check
 
 ### 4. Mixed Query Patterns
 
-**Location:** `backend/app/Http/Controllers/PropertyController.php`
+**Location:** `backend/src/Application/Property/Actions/ApiVersion1/GetPropertyAction.php`
 
 ```php
 // Eloquent
-$properties = Property::all();
+$property = Property::find($propertyId);
 
 // Raw queries in same file
-$reviews = DB::select("SELECT * FROM reviews WHERE property_id = {$id}");
+$reviews = DB::select("SELECT * FROM reviews WHERE property_id = {$propertyId}");
 
-// Query builder
+// Query builder elsewhere
 DB::table('payments')->insert([...]);
 ```
 
 ### 5. Magic Numbers & Hardcoded Values
 
-**Location:** `backend/app/Http/Controllers/BookingController.php`
+**Location:** `backend/src/Application/Booking/Actions/ApiVersion1/CreateBookingAction.php`
 
 ```php
-$vatRate = 0.21;           // Line 142 - Should be config
-$extraGuestFee = 25;       // Line 162 - Magic number
-$weeklyDiscount = 0.05;    // Line 147 - Magic number
-$seasonalRate = 1.5;       // Line 121 - Magic number
+$vatRate = 0.21;           // Should be config
+$extraGuestFee = 25;       // Magic number
+$weeklyDiscount = 0.05;    // Magic number
+$seasonalRate = 1.5;       // Magic number
 ```
 
-**Location:** `backend/app/Http/Controllers/PropertyController.php`
+**Location:** `backend/src/Application/Property/Actions/ApiVersion1/GetFeaturedPropertiesAction.php`
 
 ```php
-$apiUrl = 'https://api.staycorporate.com/featured';  // Line 161 - Hardcoded
-$maxProperties = 10;                                  // Line 162 - Magic number
-$adminEmail = 'admin@staycorporate.com';             // Line 163 - Hardcoded
+$apiUrl = 'https://api.staycorporate.com/featured';  // Hardcoded
+$maxProperties = 10;                                  // Magic number
+$adminEmail = 'admin@staycorporate.com';             // Hardcoded
 ```
 
 ### 6. Inconsistent Response Formats
 
-**Location:** Various controllers
+**Location:** Various Controllers in `backend/src/Presentation/ApiVersion1/App/Http/Controllers/`
 
 ```php
-// BookingController - Different formats
+// CreateBookingController - Different formats based on error type
 return response()->json($booking);                           // Just data
 return response()->json(['data' => $booking]);              // Wrapped in 'data'
 return response()->json(['booking' => $booking, 'success' => true]); // Different wrapper
@@ -127,7 +126,7 @@ return response()->json(['errors' => ['field' => ['msg']]], 422);
 
 ### 7. No Transaction Safety
 
-**Location:** `backend/app/Http/Controllers/BookingController.php:178-208`
+**Location:** `backend/src/Application/Booking/Actions/ApiVersion1/CreateBookingAction.php:145-175`
 
 ```php
 // No transaction - partial failures possible
@@ -138,7 +137,7 @@ $notification = DB::table('notifications')->insert([...]);
 
 ### 8. Silent Error Swallowing
 
-**Location:** `backend/app/Http/Controllers/BookingController.php:210-217`
+**Location:** `backend/src/Application/Booking/Actions/ApiVersion1/CreateBookingAction.php:177-183`
 
 ```php
 try {
@@ -150,7 +149,7 @@ try {
 
 ### 9. Dead Code
 
-**Location:** `backend/app/Http/Controllers/PropertyController.php:175-179`
+**Location:** `backend/src/Domain/Property/Eloquent/PropertyReadEloquent.php`
 
 ```php
 // This function is never called
@@ -160,10 +159,10 @@ public function oldSearch()
 }
 ```
 
-**Location:** `backend/app/Http/Controllers/BookingController.php:386-405`
+**Location:** `backend/src/Application/Booking/Actions/ApiVersion1/CreateBookingAction.php`
 
 ```php
-// Dead methods
+// Dead methods preserved in Action class
 public function handleClick2() { return null; }
 public function doStuff() { ... }
 private function temp($x) { return $x; }
@@ -171,7 +170,7 @@ private function temp($x) { return $x; }
 
 ### 10. Bad Comments
 
-**Location:** Various files
+**Location:** Various files in `backend/src/`
 
 ```php
 // TODO: Implement this feature (2018)
@@ -182,18 +181,18 @@ private function temp($x) { return $x; }
 
 ### 11. Logging Sensitive Data
 
-**Location:** `backend/app/Http/Controllers/BookingController.php:219`
+**Location:** `backend/src/Application/Booking/Actions/ApiVersion1/CreateBookingAction.php:185`
 
 ```php
-Log::info('Booking created', ['booking_id' => $booking->id, 'user_password' => $request->input('password')]);
+Log::info('Booking created', ['booking_id' => $booking->id, 'user_password' => $data['password'] ?? null]);
 ```
 
 ### 12. No Pagination
 
-**Location:** `backend/app/Http/Controllers/PropertyController.php:12-27`
+**Location:** `backend/src/Application/Property/Actions/ApiVersion1/GetAllPropertiesAction.php`
 
 ```php
-public function index()
+public function execute()
 {
     $properties = Property::all();  // Returns ALL records - could be 100,000+
     // ...
@@ -202,7 +201,7 @@ public function index()
 
 ### 13. Missing Model Relationships
 
-**Location:** `backend/app/Models/Booking.php:44-57`
+**Location:** `backend/src/Domain/Booking/Models/Booking.php:46-58`
 
 ```php
 // Manual queries instead of Eloquent relationships
@@ -219,208 +218,241 @@ public function getReviews()
 
 ---
 
-## Frontend Anti-Patterns
+## Frontend Anti-Patterns (FSD Architecture)
 
-### 14. Waterfall useEffect Hooks
+> **Note:** The frontend uses Feature-Sliced Design (FSD) architecture with layers: `app/`, `pages/`, `widgets/`, `features/`, `entities/`, `shared/`. The anti-patterns below are distributed across these layers to make them more realistic.
 
-**Location:** `frontend/src/pages/property-details.jsx`
+### 14. Cross-Layer Store Access (FSD Violation)
 
-```jsx
-useEffect(() => {
-  fetchProperty();
-}, []);
-useEffect(() => {
-  if (property) fetchReviews();
-}, [property]);
-useEffect(() => {
-  if (reviews) fetchAvailability();
-}, [reviews]);
-```
+**Location:** `frontend/src/features/booking/create-booking/model/use-create-booking.js:4`
 
-**Also in:** `frontend/src/pages/profile.jsx:25-47`
-
-```jsx
-useEffect(() => {
-  if (userId) fetchProfileData();
-}, [userId]);
-useEffect(() => {
-  if (userId) fetchBookings();
-}, [userId]);
-useEffect(() => {
-  if (userId) fetchReviews();
-}, [userId]);
-useEffect(() => {
-  if (bookings.length > 0) calculateStats();
-}, [bookings]);
-```
-
-**Also in:** `frontend/src/pages/manager-dashboard.jsx:33-51`
-
-```jsx
-useEffect(() => {
-  if (user?.is_manager) fetchTeamMembers();
-}, [user]);
-useEffect(() => {
-  if (teamMembers.length > 0) fetchPendingBookings();
-}, [teamMembers]);
-useEffect(() => {
-  if (pendingBookings) fetchAllBookings();
-}, [pendingBookings]);
-useEffect(() => {
-  if (allBookings.length > 0) calculateStats();
-}, [allBookings]);
-```
-
-### 15. Prop Drilling (6+ Levels)
-
-**Location:** `frontend/src/App.jsx` -> `header.jsx` -> `user-menu.jsx`
-
-```jsx
-// App.jsx passes to every component:
-<Header
-  user={user}
-  settings={settings}
-  theme={theme}
-  setTheme={setTheme}
-  onLogout={handleLogout}
-  notifications={notifications}
-  company={company}
-  onMarkNotificationRead={handleMarkNotificationRead}
-  onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
-/>
-
-// Same props passed through PropertyList, PropertyDetails, BookingList, Settings, Profile, ManagerDashboard
-```
-
-### 16. Giant Flat Zustand Store
-
-**Location:** `frontend/src/stores/use-app-store.js`
+Feature layer incorrectly imports from widget's internal store:
 
 ```javascript
-const useAppStore = create((set) => ({
-  user: null,
-  properties: [],
-  bookings: [],
-  reviews: [],
-  favorites: [],
-  searchQuery: "",
-  filters: {},
-  selectedProperty: null,
-  bookingDraft: null,
-  notifications: [],
-  theme: "dark",
-  isLoading: false,
-  error: null,
-  companyData: null,
-  // ... 20+ flat fields, no slices, no selectors
-}));
+// Feature importing from widget's internal store - violates FSD!
+import { useBookingFormState } from '@/widgets/booking-form/model/store/selectors';
 ```
 
-### 17. Manual For Loops Instead of Array Methods
+### 15. Inconsistent Slice Structure
 
-**Location:** `frontend/src/pages/profile.jsx:80-103`
+**Location:** `frontend/src/features/`
 
-```jsx
-const calculateStats = () => {
-  let totalSpent = 0;
-  let totalNights = 0;
-  let citiesVisited = [];
+Some features have full structure, others are flat:
 
-  for (let i = 0; i < bookings.length; i++) {
-    const booking = bookings[i];
-    totalSpent = totalSpent + parseFloat(booking.total_price || 0);
-    // ... continues with manual iteration
+```
+features/
+├── auth/              # Full structure with model/
+├── booking/           # Full structure with nested actions
+└── filters/           # Flat - just property-filters.jsx!
+```
+
+### 16. Store Slice Inconsistency
+
+**Location:** `frontend/src/shared/store/app/slices/`
+
+Different slices use different organizational patterns:
+
+```
+slices/
+├── user/           # Has separate selectors.js file
+│   ├── index.js
+│   └── selectors.js
+├── theme/          # Everything in one file
+│   └── index.js
+├── notifications/  # Just index.js
+│   └── index.js
+└── favorites/      # Has async operations mixed in
+    └── index.js
+```
+
+### 17. Shared Module-Level Timer in Debounce
+
+**Location:** `frontend/src/shared/lib/helpers.js:35-41`
+
+```javascript
+let timer;
+export function debounce(callback, delay = 250) {
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => callback(...args), delay);
+  };
+}
+```
+
+Multiple components using `debounce` will interfere with each other because they share the same `timer` variable.
+
+### 18. Mixed Import Aliases
+
+**Location:** `frontend/src/widgets/header/ui/user-menu.jsx:16`
+
+Some files use `@/` alias while others use relative paths:
+
+```javascript
+import { Button } from '@/shared/ui/button';
+import { getTierBadgeColor } from '../../../shared/lib/helpers';  // Inconsistent!
+```
+
+### 19. Business Logic in Widget
+
+**Location:** `frontend/src/widgets/booking-form/ui/booking-form.jsx:32-40`
+
+Price calculation logic in UI layer instead of feature/entity:
+
+```javascript
+useEffect(() => {
+  if (property && checkIn && checkOut && nights > 0) {
+    let price = property.price_per_night * nights;
+    if (company?.tier === 'gold') price *= 0.8;  // Business logic in UI!
+    else if (company?.tier === 'silver') price *= 0.85;
+    setTotalPrice(price);
   }
+}, [...]);
+```
+
+### 20. Optimistic Update Without Proper Rollback
+
+**Location:** `frontend/src/shared/store/app/slices/favorites/index.js:9-31`
+
+```javascript
+toggleFavorite: async (propertyId) => {
+  const { favorites, user } = get();  // Snapshot taken here
+  // ... optimistic update ...
+  set({ favorites: updatedFavorites });
+
+  try {
+    await axios.post(...);
+  } catch (error) {
+    set({ favorites });  // Rollback uses stale snapshot if other updates occurred!
+  }
+},
+```
+
+### 21. Inconsistent API Response Handling
+
+**Location:** `frontend/src/entities/property/api/queries.js`, `frontend/src/entities/booking/api/queries.js`
+
+```javascript
+// property queries
+properties: data?.data ?? data ?? [],
+curated: data?.data && Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [],
+
+// booking queries - different pattern!
+bookings: data || [],
+bookings: data?.data ?? data ?? [],
+```
+
+### 22. Index as Key in Lists
+
+**Location:** `frontend/src/pages/properties/ui/properties-page.jsx:130,154,155,188,189`
+
+```jsx
+{heroHighlights.map((highlight, idx) => (
+  <div key={`highlight-${idx}`}>...
+))}
+
+{curated.slice(0, 3).map((property, idx) => (
+  <PropertyCard key={`curated-${idx}`} property={property} />
+))}
+
+{displayedProperties.map((property, idx) => (
+  <PropertyCard key={`prop-${idx}`} property={property} />
+))}
+```
+
+**Also in:** `frontend/src/widgets/booking-form/ui/booking-form.jsx:104-107`
+
+```jsx
+{[...Array(property.max_guests || 4)].map((_, i) => (
+  <SelectItem key={i + 1} value={(i + 1).toString()}>
+```
+
+### 23. Duplicate getInitials Function
+
+**Location:** `frontend/src/widgets/header/ui/user-menu.jsx:24-26`, `frontend/src/shared/lib/helpers.js:22-28`
+
+Same utility function with slightly different implementations:
+
+```javascript
+// shared/lib/helpers.js
+export const getInitials = (name) => {
+  return name.split(' ').map(word => word[0]).join('').toUpperCase();
+};
+
+// widgets/header/ui/user-menu.jsx (different!)
+const getInitials = (name) => {
+  return name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U';
 };
 ```
 
-**Also in:** `frontend/src/pages/manager-dashboard.jsx:53-77, 79-95, 97-111`
+### 24. Duplicate Format Functions
 
-### 18. Loose Equality Checks
+**Location:** `frontend/src/shared/lib/helpers.js:1,7-9`
 
-**Location:** Various frontend files
-
-```jsx
-// profile.jsx:73
-const userBookings = response.data.filter(b => b.user_id == userId);
-
-// profile.jsx:149
-const isOwnProfile = !id || id == user?.id;
-
-// profile.jsx:166
-{displayUser?.is_manager == 1 && (...)}
-
-// manager-dashboard.jsx
-if (u.company_id == user.company_id) { ... }
-if (booking.status == 'pending') { ... }
-```
-
-### 19. Duplicate Utility Functions
-
-**Location:** Multiple files have their own `getInitials` function
-
-```jsx
-// user-menu.jsx:18-25
-const getInitials = (name) => { ... }
-
-// profile.jsx:105-113
-const getInitials = (name) => { ... }
-
-// settings.jsx:36-43
-const getInitials = (name) => { ... }
-
-// manager-dashboard.jsx:158-166
-const getInitials = (name) => { ... }
-```
-
-### 20. Inefficient Re-fetching
-
-**Location:** `frontend/src/pages/manager-dashboard.jsx:131-142`
-
-```jsx
-const handleApprove = async (bookingId) => {
-  await axios.put(`/api/bookings/${bookingId}`, { status: "confirmed" });
-  // Refetches EVERYTHING instead of updating local state
-  fetchTeamMembers(); // Triggers waterfall of all other fetches
+```javascript
+export const formatPrice = (price) => '$' + parseFloat(price).toFixed(2);
+export const formatCurrency = (amount) => {
+  return '$' + parseFloat(amount).toFixed(2);
 };
+// These are identical!
 ```
 
-### 21. No Error Boundaries
+### 25. Loose Equality Check
 
-**Location:** `frontend/src/App.jsx`
+**Location:** `frontend/src/widgets/header/ui/user-menu.jsx:74`
 
-- No React Error Boundaries anywhere in the app
-- Errors crash the entire application
-
-### 22. Console.log Debugging Left In
-
-**Location:** Various files
-
-```jsx
-// profile.jsx:55, 66, 76
-console.log("Error:", err);
-console.log("Error fetching bookings:", err);
-
-// manager-dashboard.jsx
-console.log("Error:", err);
+```javascript
+{user.is_manager == 1 && (
+  <>
+    <DropdownMenuSeparator />
+    <DropdownMenuItem>Manager Dashboard</DropdownMenuItem>
+  </>
+)}
 ```
+
+### 26. Missing Public API Index Files
+
+**Location:** Various FSD slices
+
+Some entities and features lack proper `index.js` exports, forcing deep imports:
+
+```javascript
+// Bad - deep import from internal path
+import { useUserBookings } from '@/entities/booking/api/queries';
+
+// Should be
+import { useUserBookings } from '@/entities/booking';
+```
+
+Missing in: `entities/booking/`, `entities/user/`, `features/booking/`
+
+### 27. useMemo Without Meaningful Dependencies
+
+**Location:** `frontend/src/pages/properties/ui/properties-page.jsx:40-42`
+
+```javascript
+const cities = useMemo(() => {
+  return properties.map((p) => p.city);
+}, [properties]);
+```
+
+Creates a new array with potentially duplicate cities on every properties change. Also doesn't deduplicate.
 
 ---
 
 ## Database Anti-Patterns
 
-### 23. Missing Indexes
+### 28. Missing Indexes
 
-**Location:** `backend/database/migrations/create_tables.php`
+**Location:** `backend/src/Infrastructure/Database/Migrations/2024_01_01_000001_create_tables.php`
 
 - No index on `bookings.property_id`
 - No index on `bookings.user_id`
 - No index on `reviews.property_id`
 - No index on `reviews.user_id`
 
-### 24. No Foreign Key Constraints
+### 29. No Foreign Key Constraints
 
-**Location:** `backend/database/migrations/create_tables.php`
+**Location:** `backend/src/Infrastructure/Database/Migrations/2024_01_01_000001_create_tables.php`
 
 ```php
 // No foreign keys defined - referential integrity not enforced
@@ -429,18 +461,18 @@ $table->unsignedBigInteger('user_id');
 // Missing: ->constrained()->onDelete('cascade')
 ```
 
-### 25. No Unique Constraints
+### 30. No Unique Constraints
 
-**Location:** `backend/database/migrations/create_tables.php`
+**Location:** `backend/src/Infrastructure/Database/Migrations/2024_01_01_000001_create_tables.php`
 
 ```php
 // users.email has no UNIQUE constraint - allows duplicate emails
 $table->string('email');  // Should be: $table->string('email')->unique();
 ```
 
-### 26. JSON Blob Instead of Normalized Table
+### 31. JSON Blob Instead of Normalized Table
 
-**Location:** `backend/database/migrations/create_tables.php`
+**Location:** `backend/src/Infrastructure/Database/Migrations/2024_01_01_000001_create_tables.php`
 
 ```php
 // booking_metadata is a JSON blob
@@ -448,7 +480,7 @@ $table->json('booking_metadata')->nullable();
 // Should be normalized into separate columns or related tables
 ```
 
-### 27. Inconsistent Timestamp Handling
+### 32. Inconsistent Timestamp Handling
 
 **Location:** Various tables
 
@@ -460,27 +492,43 @@ $table->json('booking_metadata')->nullable();
 
 ## Architecture Anti-Patterns
 
-### 28. No Service Layer
+### 33. No Service Layer (Partially Addressed)
 
-- All business logic in controllers
-- No separation of concerns
-- Controllers handle: validation, business logic, data access, formatting
+**Status:** The codebase now has Actions (use cases), but they contain business logic that should be extracted to dedicated services.
 
-### 29. No Repository Pattern
+**Location:** `backend/src/Application/Booking/Actions/ApiVersion1/CreateBookingAction.php`
 
-- Direct model calls in controllers
-- No abstraction over data access
-- Hard to test, hard to swap implementations
+- Pricing logic embedded in Action
+- Discount calculations inline
+- Seasonal rate logic not abstracted
 
-### 30. No DTO/Request Validation Classes
+### 34. No Repository Pattern (Partially Addressed)
 
-- Validation scattered across controller methods
-- Inconsistent validation rules
-- No type safety on request data
+**Status:** Eloquent wrappers exist but are inconsistently used.
 
-### 31. Mixing Concerns in Models
+**Location:** `backend/src/Domain/*/Eloquent/`
 
-**Location:** `backend/app/Models/Booking.php`
+- Some Actions use Eloquent wrappers
+- Others call Model directly
+- No interface abstractions
+
+### 35. No DTO/Request Validation Classes (Partially Addressed)
+
+**Status:** Request classes exist but have copy-pasted validation rules.
+
+**Location:** `backend/src/Presentation/ApiVersion1/App/Http/Requests/`
+
+```php
+// CreateBookingRequest.php
+'check_in' => ['required', 'date', 'after:today']
+
+// UpdateBookingRequest.php - Copy-pasted!
+'check_in' => ['sometimes', 'date', 'after:today']
+```
+
+### 36. Mixing Concerns in Models
+
+**Location:** `backend/src/Domain/Booking/Models/Booking.php`
 
 ```php
 // Model contains:
@@ -494,7 +542,7 @@ $table->json('booking_metadata')->nullable();
 
 ## Testing Anti-Patterns
 
-### 32. Happy Path Only Tests
+### 37. Happy Path Only Tests
 
 **Location:** `backend/tests/Feature/BookingTest.php`
 
@@ -503,90 +551,7 @@ $table->json('booking_metadata')->nullable();
 - No error scenarios
 - Hardcoded test data instead of factories
 
----
-
-### 33. Memory Leaks - No Cleanup
-
-**Location:** `frontend/src/pages/property-details.jsx:49-53`
-
-```jsx
-useEffect(() => {
-  fetchProperty();
-  const interval = setInterval(pollAvailability, 30000); // Never cleared!
-  window.addEventListener("resize", handleResize); // Never removed!
-}, []); // No cleanup function returned
-```
-
-### 34. Using alert() for User Feedback
-
-**Location:** `frontend/src/pages/property-details.jsx:146-151, 169`
-
-```jsx
-if (!user) {
-  alert("Please login to book"); // Should use toast/modal
-  return;
-}
-// ...
-alert("Booking failed: " + (err.response?.data?.error || "Unknown error"));
-```
-
-### 35. Importing Entire Libraries
-
-**Location:** `frontend/src/pages/property-details.jsx:4-6`
-
-```jsx
-import _ from "lodash"; // Imports entire 70kb library
-import * as Utils from "../utils/helpers"; // Imports everything, tree-shaking impossible
-```
-
-### 36. 700+ Line Component Monolith
-
-**Location:** `frontend/src/pages/property-details.jsx`
-
-- 700+ lines in single component
-- Multiple responsibilities: fetching, booking form, reviews, image gallery
-- Should be split into smaller components
-
-### 37. Duplicate Helper Functions
-
-**Location:** `frontend/src/utils/helpers.js:1-3, 45-47, 60-66`
-
-```javascript
-// Same function defined multiple times!
-export function formatPrice(price) {
-  return "$" + parseFloat(price).toFixed(2);
-}
-
-export function formatCurrency(amount) {
-  return "$" + parseFloat(amount).toFixed(2); // Same as formatPrice!
-}
-
-export function formatPrice2(price) {
-  return "$" + parseFloat(price).toFixed(2); // Duplicate with number suffix
-}
-
-export function formatCurrency2(amount) {
-  return "$" + parseFloat(amount).toFixed(2); // Another duplicate
-}
-```
-
-### 38. Dead Code with Ancient TODOs
-
-**Location:** `frontend/src/utils/helpers.js:68-76`
-
-```javascript
-// TODO: Remove this after Q2 launch (2019)  // 6 years old!
-export function oldCalculation(a, b) {
-  return a + b;
-}
-
-// FIXME: This is temporary
-export function tempFunction() {
-  return null;
-}
-```
-
-### 39. Tests with Meaningless Assertions
+### 38. Tests with Meaningless Assertions
 
 **Location:** `backend/tests/Feature/BookingTest.php`
 
@@ -615,7 +580,7 @@ public function test_seasonal_pricing()
 }
 ```
 
-### 40. Tests Dependent on Execution Order
+### 39. Tests Dependent on Execution Order
 
 **Location:** `backend/tests/Feature/BookingTest.php:24-48`
 
@@ -638,7 +603,7 @@ public function test_b_user_can_login()
 }
 ```
 
-### 41. Tests with Hardcoded IDs
+### 40. Tests with Hardcoded IDs
 
 **Location:** `backend/tests/Feature/BookingTest.php`
 
@@ -649,7 +614,7 @@ $response = $this->get('/api/users/1');
 $response = $this->delete('/api/bookings/999');  // Magic number
 ```
 
-### 42. No Test Isolation
+### 41. No Test Isolation
 
 **Location:** `backend/tests/Feature/BookingTest.php`
 
@@ -658,125 +623,6 @@ $response = $this->delete('/api/bookings/999');  // Magic number
 - No `RefreshDatabase` trait
 - No factories used
 
-### 43. Empty handleResize Function
-
-**Location:** `frontend/src/pages/property-details.jsx:73-75`
-
-```jsx
-const handleResize = () => {
-  console.log("Window resized"); // Does nothing useful, just logs
-};
-```
-
-### 44. Unused Store Updates
-
-**Location:** `frontend/src/pages/property-details.jsx:89, 165, 187`
-
-```jsx
-store.addRecentlyViewed(id); // Updates store but component uses local state
-store.addBooking(response.data.booking); // Store updated but never read
-store.addReview(response.data.review); // Redundant with local state
-```
-
-### 45. Multiple useState for Form
-
-**Location:** `frontend/src/pages/property-details.jsx:28-45`
-
-```jsx
-// 18 useState calls! Should use useReducer or form library
-const [property, setProperty] = useState(null);
-const [reviews, setReviews] = useState([]);
-const [availability, setAvailability] = useState([]);
-const [loading, setLoading] = useState(true);
-const [reviewsLoading, setReviewsLoading] = useState(false);
-const [availabilityLoading, setAvailabilityLoading] = useState(false);
-const [error, setError] = useState(null);
-const [checkIn, setCheckIn] = useState("");
-const [checkOut, setCheckOut] = useState("");
-const [guests, setGuests] = useState("2");
-const [totalPrice, setTotalPrice] = useState(0);
-const [isSubmitting, setIsSubmitting] = useState(false);
-const [showModal, setShowModal] = useState(false);
-const [selectedImage, setSelectedImage] = useState(0);
-const [showAllReviews, setShowAllReviews] = useState(false);
-const [newReview, setNewReview] = useState({ rating: "5", comment: "" });
-const [isReviewSubmitting, setIsReviewSubmitting] = useState(false);
-const [imageLoaded, setImageLoaded] = useState(false);
-```
-
-### 46. Index as Key in Lists
-
-**Location:** `frontend/src/pages/property-details.jsx:437, 450, 470`
-
-```jsx
-{[1, 2, 3].map((i) => (
-  <Skeleton key={i} className="h-24 rounded-xl" />  // Index as key
-))}
-
-{reviews.slice(0, 5).map((review, i) => (
-  <div key={i} ...>  // Index as key for dynamic list - causes re-render issues
-))}
-```
-
-### 47. Hardcoded UI Strings
-
-**Location:** `frontend/src/pages/property-details.jsx:352-354`
-
-```jsx
-// Hardcoded values that should come from API or config
-{ icon: Clock, label: 'Check-in', value: '3:00 PM' },
-{ icon: Clock, label: 'Check-out', value: '11:00 AM' },
-{ icon: Shield, label: 'Cancellation', value: 'Free 48h' },
-```
-
-### 48. Inconsistent Error Handling
-
-**Location:** Various files
-
-```jsx
-// property-details.jsx - uses alert()
-alert('Booking failed: ' + error);
-
-// booking-list.jsx - also uses alert()
-alert('Failed to cancel booking');
-
-// manager-dashboard.jsx - silently fails
-catch (err) {
-  console.log('Error:', err);
-}
-
-// Should use consistent toast/notification system
-```
-
-### 49. No Loading State Handling for Dependent Data
-
-**Location:** `frontend/src/pages/property-details.jsx:257`
-
-```jsx
-// Attempts to access property.amenities before checking if property is loaded
-const amenities =
-  typeof property.amenities === "string"
-    ? JSON.parse(property.amenities)
-    : property.amenities || [];
-// Could crash if property is null
-```
-
-### 50. Business Logic in Component
-
-**Location:** `frontend/src/pages/property-details.jsx:123-142`
-
-```jsx
-const calculatePrice = async () => {
-  // Fallback calculation duplicates backend logic!
-  if (property && checkIn && checkOut) {
-    const nights = differenceInDays(new Date(checkOut), new Date(checkIn));
-    let price = property.price_per_night * nights;
-    if (company?.tier === "gold") price *= 0.8; // Duplicated discount logic
-    setTotalPrice(price);
-  }
-};
-```
-
 ---
 
 ## Summary Statistics
@@ -784,23 +630,30 @@ const calculatePrice = async () => {
 | Category                   | Count  |
 | -------------------------- | ------ |
 | Backend Anti-Patterns      | 13     |
-| Frontend Anti-Patterns     | 18     |
+| Frontend Anti-Patterns     | 14     |
 | Database Anti-Patterns     | 5      |
 | Architecture Anti-Patterns | 4      |
-| Testing Anti-Patterns      | 10     |
-| **Total**                  | **50** |
+| Testing Anti-Patterns      | 5      |
+| **Total**                  | **41** |
 
 ---
 
 ## Workshop Exercise Suggestions
 
-1. **Extract Service Layer** - Move business logic from BookingController to dedicated services
-2. **Fix N+1 Queries** - Use Eloquent eager loading (`with()`)
-3. **Add Database Indexes** - Create migration to add missing indexes
-4. **Implement Repository Pattern** - Abstract data access
-5. **Fix Waterfall Fetches** - Use Promise.all or React Query
-6. **Add Error Boundaries** - Implement React error handling
-7. **Split Zustand Store** - Create slices with selectors
-8. **Eliminate Prop Drilling** - Use React Context or Zustand
-9. **Standardize API Responses** - Create response wrapper classes
-10. **Add Proper Validation** - Use Laravel Form Requests
+### Warm-up Level (Easy to Spot)
+1. **Fix Duplicate Helpers** - Consolidate `formatPrice`/`formatCurrency` and duplicate `getInitials`
+2. **Fix Loose Equality** - Replace `==` with `===` in user-menu.jsx
+3. **Consistent Import Aliases** - Standardize `@/` usage across the codebase
+4. **Add Missing index.js** - Create public API files for entities/features
+
+### Intermediate Level
+5. **Fix Debounce Memory Leak** - Create closure-based debounce that doesn't share state
+6. **Fix FSD Layer Violations** - Move widget store access to proper layer boundaries
+7. **Extract Business Logic** - Move price calculation from widget to feature/entity
+8. **Use Proper Keys** - Replace index-based keys with stable identifiers
+
+### Advanced Level
+9. **Fix Optimistic Update** - Implement proper rollback with current state
+10. **Standardize API Response Handling** - Create consistent data unwrapping layer
+11. **Extract Service Layer** - Move pricing logic from CreateBookingAction to dedicated PricingService
+12. **Fix N+1 Queries** - Use Eloquent eager loading (`with()`) in Eloquent wrappers
