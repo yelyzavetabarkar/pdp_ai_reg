@@ -211,7 +211,7 @@ function mapOptions(j, optionsArg) {
 }
 
 function transformUseSWRConfig(j, root) {
-  const mutateVarNames = new Set();
+  const mutateVarNamesSet = new Set();
 
   root
     .find(j.VariableDeclarator, {
@@ -224,7 +224,7 @@ function transformUseSWRConfig(j, root) {
         declarator.id.properties.forEach((prop) => {
           if (prop.key && prop.key.name === 'mutate') {
             const localName = prop.value ? prop.value.name : prop.key.name;
-            mutateVarNames.add(localName);
+            mutateVarNamesSet.add(localName);
           }
         });
 
@@ -237,7 +237,7 @@ function transformUseSWRConfig(j, root) {
       }
     });
 
-  mutateVarNames.forEach((varName) => {
+  mutateVarNamesSet.forEach((varName) => {
     root.find(j.CallExpression, { callee: { name: varName } }).forEach((path) => {
       const args = path.node.arguments;
       if (args.length === 0) return;
