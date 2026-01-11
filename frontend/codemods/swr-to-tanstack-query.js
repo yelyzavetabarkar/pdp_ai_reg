@@ -360,7 +360,7 @@ function mapOptions(j, optionsArg) {
       // If the value is already a function, use it as-is, otherwise wrap it
       const value = prop.value.type === 'ArrowFunctionExpression' || prop.value.type === 'FunctionExpression'
         ? prop.value
-        : j.arrowFunctionExpression([], prop.value);
+        : j.arrowFunctionExpression([j.identifier('attemptIndex')], prop.value);
       mappedProperties.push(j.property('init', j.identifier('retryDelay'), value));
     } else if (mappedKey) {
       mappedProperties.push(j.property('init', j.identifier(mappedKey), prop.value));
