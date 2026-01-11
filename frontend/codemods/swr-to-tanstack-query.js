@@ -1,3 +1,61 @@
+/**
+ * SWR to TanStack Query (React Query) Codemod
+ *
+ * Automatically migrates SWR data fetching hooks to TanStack Query equivalents.
+ *
+ * @see https://swr.vercel.app → https://tanstack.com/query
+ *
+ * ## Supported Transformations
+ *
+ * - `useSWR()` → `useQuery()`
+ * - `useSWRConfig()` → `useQueryClient()`
+ * - `<SWRConfig>` → `<QueryClientProvider>`
+ * - `swrConfig` exports → `QueryClient` instances
+ * - Conditional keys (`key ? key : null`) → `enabled` option
+ * - Return values: `isValidating` → `isFetching`, `mutate` → `refetch`
+ * - Options mapping (refreshInterval, revalidateOnFocus, etc.)
+ *
+ * ## NOT Supported (Manual Migration Required)
+ *
+ * The following SWR features are NOT handled by this codemod and require manual migration:
+ *
+ * - `useSWRInfinite` → Must manually migrate to `useInfiniteQuery`
+ * - `useSWRMutation` → Must manually migrate to `useMutation`
+ * - `useSWRImmutable` → Use `useQuery` with `staleTime: Infinity`
+ * - Middleware functions → TanStack Query uses different patterns
+ * - Custom cache providers → Configure QueryClient differently
+ * - `compare` option → No direct equivalent
+ * - `isPaused()` → Use `status === 'paused'`
+ *
+ * ## Known Limitations
+ *
+ * - **Semantic differences:** SWR's `isValidating` (background refresh only) differs from
+ *   TanStack Query's `isFetching` (any fetch including initial). Review usage carefully.
+ * - **Global mutate with data:** Transformed to `setQueryData` + `invalidateQueries`
+ * - **Options:** Some SWR options (loadingTimeout, focusThrottleInterval) have no equivalent
+ * - **Variable conflicts:** Does not check if `queryClient` variable name is already taken
+ *
+ * ## Usage
+ *
+ * ```bash
+ * npx jscodeshift -t codemods/swr-to-tanstack-query.js --extensions=js,jsx src/
+ * ```
+ *
+ * @param {Object} file - File object with source code
+ * @param {Object} api - jscodeshift API
+ * @returns {string} Transformed source code
+ */
+
+// Constants for package and variable names
+const TANSTACK_QUERY_PACKAGE = '@tanstack/react-query';
+const SWR_PACKAGE = 'swr';
+const QUERY_CLIENT_VAR = 'queryClient';
+const USE_QUERY = 'useQuery';
+const USE_QUERY_CLIENT = 'useQueryClient';
+const QUERY_CLIENT_PROVIDER = 'QueryClientProvider';
+const QUERY_CLIENT_CLASS = 'QueryClient';
+
+// Options mapping from SWR to TanStack Query
 const SWR_TO_TANSTACK_OPTIONS_MAP = {
   refreshInterval: 'refetchInterval',
   revalidateOnFocus: 'refetchOnWindowFocus',
@@ -58,7 +116,7 @@ module.exports = function transformer(file, api) {
   root.find(j.ExportNamedDeclaration).forEach((path) => {
     if (path.node.declaration && path.node.declaration.type === 'VariableDeclaration') {
       path.node.declaration.declarations.forEach((decl) => {
-        if (decl.id.name === 'swrConfig') {
+        if (decl.id && decl.id.type === 'Identifier' && decl.id.name === 'swrConfig') {
           hasSwrConfigExport = true;
           needsQueryClient = true;
         }
@@ -101,6 +159,16 @@ module.exports = function transformer(file, api) {
   return root.toSource({ quote: 'single', trailingComma: true });
 };
 
+/**
+ * Tracks all variable names used for mutate from useSWR destructuring.
+ *
+ * Example: const { mutate } = useSWR(...) → tracks "mutate"
+ * Example: const { mutate: update } = useSWR(...) → tracks "update"
+ *
+ * @param {Object} j - jscodeshift API
+ * @param {Object} root - AST root
+ * @param {Set} mutateVars - Set to store mutate variable names
+ */
 function trackMutateVariables(j, root, mutateVars) {
   root
     .find(j.VariableDeclarator, {
@@ -110,32 +178,68 @@ function trackMutateVariables(j, root, mutateVars) {
       const declarator = path.node;
       if (declarator.id.type === 'ObjectPattern') {
         declarator.id.properties.forEach((prop) => {
-          if (prop.key && prop.key.name === 'mutate') {
-            const localName = prop.value ? prop.value.name : prop.key.name;
-            mutateVars.add(localName);
+          if (
+            prop &&
+            prop.type === 'Property' &&
+            prop.key &&
+            prop.key.type === 'Identifier' &&
+            prop.key.name === 'mutate'
+          ) {
+            let localName = null;
+            if (prop.value && prop.value.type === 'Identifier') {
+              localName = prop.value.name;
+            } else {
+              // Fallback to the key name for shorthand properties
+              localName = prop.key.name;
+            }
+            if (localName) {
+              mutateVars.add(localName);
+            }
           }
         });
       }
     });
 }
 
+/**
+ * Transforms all useSWR() calls to useQuery() calls.
+ *
+ * Before: const { data, error } = useSWR('/api/user', fetcher, { refreshInterval: 5000 })
+ * After:  const { data, error } = useQuery({ queryKey: ['/api/user'], queryFn: ..., refetchInterval: 5000 })
+ *
+ * Also handles:
+ * - Conditional keys (key ? key : null) → enabled option
+ * - Return value mapping (isValidating → isFetching)
+ * - Options transformation
+ *
+ * @param {Object} j - jscodeshift API
+ * @param {Object} root - AST root
+ */
 function transformUseSWRCalls(j, root) {
   root
     .find(j.CallExpression, { callee: { name: 'useSWR' } })
     .forEach((path) => {
       const args = path.node.arguments;
-      if (args.length < 2) return;
+      // Skip only truly invalid calls with no arguments
+      // Calls with a single key (relying on a global fetcher) are handled by
+      // omitting queryFn so that a global queryFn can be used by TanStack Query
+      if (args.length === 0) return;
 
-      const [keyArg, fetcherArg, optionsArg] = args;
+      const keyArg = args[0];
+      const fetcherArg = args[1];
+      const optionsArg = args[2];
 
       const { queryKey, enabledCondition } = extractKeyAndEnabled(j, keyArg);
 
-      const queryFn = buildQueryFn(j, fetcherArg, queryKey);
-
       const properties = [
         j.property('init', j.identifier('queryKey'), j.arrayExpression([queryKey])),
-        j.property('init', j.identifier('queryFn'), queryFn),
       ];
+
+      // Only add queryFn if a fetcher is provided
+      if (fetcherArg) {
+        const queryFn = buildQueryFn(j, fetcherArg, queryKey);
+        properties.push(j.property('init', j.identifier('queryFn'), queryFn));
+      }
 
       if (enabledCondition) {
         properties.push(j.property('init', j.identifier('enabled'), enabledCondition));
@@ -152,6 +256,10 @@ function transformUseSWRCalls(j, root) {
 
       path.replace(useQueryCall);
 
+      // Transform return value properties: isValidating → isFetching
+      // NOTE: Semantic difference! SWR's isValidating is true only during background revalidation,
+      // while TanStack Query's isFetching is true during ANY fetch (including initial).
+      // Review usage carefully if conditional rendering depends on this value.
       const parentPath = path.parent;
       if (
         parentPath &&
@@ -178,6 +286,19 @@ function transformUseSWRCalls(j, root) {
     });
 }
 
+/**
+ * Extracts query key and enabled condition from conditional key expressions.
+ *
+ * SWR uses conditional keys for conditional fetching:
+ *   useSWR(userId ? `/api/user/${userId}` : null, fetcher)
+ *
+ * TanStack Query uses the enabled option:
+ *   useQuery({ queryKey: [`/api/user/${userId}`], enabled: userId, ... })
+ *
+ * @param {Object} j - jscodeshift API
+ * @param {Object} keyArg - The key argument AST node
+ * @returns {{queryKey: Object, enabledCondition: Object|null}}
+ */
 function extractKeyAndEnabled(j, keyArg) {
   if (keyArg.type === 'ConditionalExpression') {
     const { test, consequent, alternate } = keyArg;
@@ -198,20 +319,25 @@ function extractKeyAndEnabled(j, keyArg) {
   return { queryKey: keyArg, enabledCondition: null };
 }
 
+/**
+ * Builds a queryFn that wraps the fetcher for TanStack Query.
+ *
+ * SWR: fetcher receives the key directly: `fetcher('/api/user')`
+ * TanStack Query: queryFn receives context object: `({ queryKey }) => fetcher(queryKey[0])`
+ *
+ * @param {Object} j - jscodeshift API
+ * @param {Object} fetcherArg - The fetcher argument AST node
+ * @param {Object} queryKey - The query key AST node (unused but kept for future use)
+ * @returns {Object} Arrow function expression wrapping the fetcher
+ */
 function buildQueryFn(j, fetcherArg, queryKey) {
+  // If the fetcher is already a function expression, use it as-is
   if (fetcherArg.type === 'ArrowFunctionExpression' || fetcherArg.type === 'FunctionExpression') {
     return fetcherArg;
   }
 
-  if (fetcherArg.type === 'Identifier') {
-    return j.arrowFunctionExpression(
-      [j.objectPattern([j.property('init', j.identifier('queryKey'), j.identifier('queryKey'))])],
-      j.callExpression(fetcherArg, [
-        j.memberExpression(j.identifier('queryKey'), j.literal(0), true),
-      ])
-    );
-  }
-
+  // For all other cases (Identifier, MemberExpression, etc.), wrap in an arrow function
+  // TanStack Query passes { queryKey, signal, ... } to queryFn, extract the key value
   return j.arrowFunctionExpression(
     [j.objectPattern([j.property('init', j.identifier('queryKey'), j.identifier('queryKey'))])],
     j.callExpression(fetcherArg, [
@@ -235,6 +361,13 @@ function mapOptions(j, optionsArg) {
         j.identifier('previousData')
       );
       mappedProperties.push(j.property('init', j.identifier('placeholderData'), placeholderValue));
+    } else if (keyName === 'errorRetryInterval') {
+      // TanStack Query's retryDelay expects a function: (attemptIndex: number) => number
+      // If the value is already a function, use it as-is, otherwise wrap it
+      const value = prop.value.type === 'ArrowFunctionExpression' || prop.value.type === 'FunctionExpression'
+        ? prop.value
+        : j.arrowFunctionExpression([], prop.value);
+      mappedProperties.push(j.property('init', j.identifier('retryDelay'), value));
     } else if (mappedKey) {
       mappedProperties.push(j.property('init', j.identifier(mappedKey), prop.value));
     } else if (keyName !== 'fetcher' && keyName !== 'loadingTimeout' && keyName !== 'focusThrottleInterval') {
@@ -257,9 +390,23 @@ function transformUseSWRConfig(j, root) {
 
       if (declarator.id.type === 'ObjectPattern') {
         declarator.id.properties.forEach((prop) => {
-          if (prop.key && prop.key.name === 'mutate') {
-            const localName = prop.value ? prop.value.name : prop.key.name;
-            trackedMutateVars.add(localName);
+          if (
+            prop &&
+            prop.type === 'Property' &&
+            prop.key &&
+            prop.key.type === 'Identifier' &&
+            prop.key.name === 'mutate'
+          ) {
+            let localName = null;
+            if (prop.value && prop.value.type === 'Identifier') {
+              localName = prop.value.name;
+            } else {
+              // Fallback to the key name for shorthand properties
+              localName = prop.key.name;
+            }
+            if (localName) {
+              trackedMutateVars.add(localName);
+            }
           }
         });
 
@@ -282,31 +429,47 @@ function transformUseSWRConfig(j, root) {
       if (args.length >= 2) {
         const dataArg = args[1];
 
-        const setDataCall = j.callExpression(
-          j.memberExpression(j.identifier('queryClient'), j.identifier('setQueryData')),
-          [j.arrayExpression([keyArg]), dataArg]
+        const setDataCall = j.expressionStatement(
+          j.callExpression(
+            j.memberExpression(j.identifier(QUERY_CLIENT_VAR), j.identifier('setQueryData')),
+            [j.arrayExpression([keyArg]), dataArg]
+          )
         );
 
-        const invalidateCall = j.callExpression(
-          j.memberExpression(j.identifier('queryClient'), j.identifier('invalidateQueries')),
-          [
-            j.objectExpression([
-              j.property('init', j.identifier('queryKey'), j.arrayExpression([keyArg])),
-            ]),
-          ]
+        const invalidateCall = j.expressionStatement(
+          j.callExpression(
+            j.memberExpression(j.identifier(QUERY_CLIENT_VAR), j.identifier('invalidateQueries')),
+            [
+              j.objectExpression([
+                j.property('init', j.identifier('queryKey'), j.arrayExpression([keyArg])),
+              ]),
+            ]
+          )
         );
 
-        path.replace(
-          j.sequenceExpression([setDataCall, invalidateCall])
+        // Wrap in IIFE to work in both statement and expression contexts
+        // Before: mutate(key, data)
+        // After: (() => { queryClient.setQueryData(...); queryClient.invalidateQueries(...); })()
+        const iife = j.callExpression(
+          j.arrowFunctionExpression(
+            [],
+            j.blockStatement([setDataCall, invalidateCall])
+          ),
+          []
         );
+
+        path.replace(iife);
 
         if (args.length > 2) {
-          const statement = path.parent.value;
-          if (statement && statement.leadingComments) {
-            statement.leadingComments.push(
-              j.commentLine(' TODO: SWR mutate() options argument not fully migrated - manual review needed')
-            );
-          }
+          // Add a TODO comment for manual review when options argument is present
+          const comment = j.commentLine(
+            ' TODO: SWR mutate() options argument not fully migrated - manual review needed',
+            true,
+            false
+          );
+          const targetNode = (path.parent && path.parent.value) || path.node;
+          targetNode.comments = targetNode.comments || [];
+          targetNode.comments.push(comment);
         }
       } else {
         const invalidateCall = j.callExpression(
@@ -322,8 +485,24 @@ function transformUseSWRConfig(j, root) {
       }
     });
 
+    // Only rename mutate variables in React hook dependency arrays
+    // e.g., useEffect(..., [mutate]) -> useEffect(..., [queryClient])
     root.find(j.Identifier, { name: varName }).forEach((path) => {
-      if (path.parent.node.type === 'ArrayExpression') {
+      const parent = path.parent.node;
+      const grandParentPath = path.parent.parent;
+      const grandParent = grandParentPath && grandParentPath.node;
+
+      // Only rename in React hook dependency arrays
+      if (
+        parent.type === 'ArrayExpression' &&
+        grandParent &&
+        grandParent.type === 'CallExpression' &&
+        Array.isArray(grandParent.arguments) &&
+        grandParent.arguments[grandParent.arguments.length - 1] === parent &&
+        grandParent.callee &&
+        grandParent.callee.type === 'Identifier' &&
+        /^use[A-Z0-9]/.test(grandParent.callee.name)
+      ) {
         path.node.name = 'queryClient';
       }
     });
@@ -359,7 +538,7 @@ function transformSwrConfigExport(j, root) {
   root.find(j.ExportNamedDeclaration).forEach((path) => {
     if (path.node.declaration && path.node.declaration.type === 'VariableDeclaration') {
       path.node.declaration.declarations.forEach((decl) => {
-        if (decl.id.name === 'swrConfig' && decl.init.type === 'ObjectExpression') {
+        if (decl.id && decl.id.type === 'Identifier' && decl.id.name === 'swrConfig' && decl.init && decl.init.type === 'ObjectExpression') {
           const defaultOptions = [];
 
           decl.init.properties.forEach((prop) => {
