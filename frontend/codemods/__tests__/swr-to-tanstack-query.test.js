@@ -54,7 +54,7 @@ describe('SWR to TanStack Query Codemod', () => {
       expect(output).not.toContain('revalidateOnFocus');
     });
 
-    it('should skip useSWR with less than 2 arguments', () => {
+    it('should transform useSWR with 1 argument (key only, omitting queryFn)', () => {
       const input = `
         import useSWR from 'swr';
 
@@ -63,7 +63,7 @@ describe('SWR to TanStack Query Codemod', () => {
 
       const output = applyTransform(input);
 
-      // Should still transform imports but skip the call
+      // Should transform imports and the call (omitting queryFn to rely on global queryFn)
       expect(output).toContain('useQuery');
     });
   });

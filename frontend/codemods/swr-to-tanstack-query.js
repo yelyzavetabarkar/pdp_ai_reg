@@ -29,8 +29,9 @@
  *
  * ## Known Limitations
  *
- * - **Semantic differences:** SWR's `isValidating` (background refresh only) differs from
- *   TanStack Query's `isFetching` (any fetch including initial). Review usage carefully.
+ * - **Semantic differences:** SWR's `isValidating` is false during the initial load when
+ *   there is no cached data, while TanStack Query's `isFetching` is true for any fetch
+ *   including initial loads. Review usage carefully.
  * - **Global mutate with data:** Transformed to `setQueryData` + `invalidateQueries`
  * - **Options:** Some SWR options (loadingTimeout, focusThrottleInterval) have no equivalent
  * - **Variable conflicts:** Does not check if `queryClient` variable name is already taken
