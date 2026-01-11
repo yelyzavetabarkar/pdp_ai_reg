@@ -91,12 +91,8 @@ describe('SWR to TanStack Query Codemod', () => {
 
       const output = applyTransform(input);
 
-      // More specific assertion: check the specific useQuery call doesn't have enabled
-      const queryCallMatch = output.match(/useQuery\(\s*\{[\s\S]*?queryKey:\s*\[['"]\/api\/user['"]\][\s\S]*?\}\s*\)/);
-      expect(queryCallMatch).not.toBeNull();
-      const queryCall = queryCallMatch[0];
-
-      expect(queryCall).not.toContain('enabled:');
+      expect(output).not.toContain('enabled:');
+      expect(output).toContain('queryKey: [\'/api/user\']');
     });
   });
 
