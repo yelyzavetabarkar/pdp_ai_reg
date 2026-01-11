@@ -6,10 +6,14 @@ const SWR_TO_TANSTACK_OPTIONS_MAP = {
   errorRetryCount: 'retry',
   errorRetryInterval: 'retryDelay',
   dedupingInterval: 'staleTime',
-  focusThrottleInterval: 'refetchOnWindowFocus',
-  loadingTimeout: 'networkMode',
   suspense: 'suspense',
-  keepPreviousData: 'placeholderData',
+};
+
+// Options that have no direct equivalent in Tanstack Query
+const SWR_OPTIONS_WITHOUT_MAPPING = {
+  focusThrottleInterval: 'No direct equivalent. SWR uses a number (ms) to throttle focus revalidation, but Tanstack Query only has refetchOnWindowFocus (boolean). Consider removing or implementing custom logic.',
+  loadingTimeout: 'No direct equivalent. SWR uses this to delay showing loading state, but Tanstack Query has no such option. Implement manually in your component if needed.',
+  keepPreviousData: 'Use placeholderData: (previousData) => previousData instead. The boolean mapping is incorrect for Tanstack Query v5.',
 };
 
 export default function transformer(file, api) {
@@ -144,14 +148,25 @@ function transformUseSWRCalls(j, root) {
         properties.push(j.property('init', j.identifier('enabled'), enabledCondition));
       }
 
+      let todoComments = [];
       if (optionsArg && optionsArg.type === 'ObjectExpression') {
-        const mappedOptions = mapOptions(j, optionsArg);
-        properties.push(...mappedOptions);
+        const { mappedProperties, todoComments: optionTodos } = mapOptions(j, optionsArg);
+        properties.push(...mappedProperties);
+        todoComments = optionTodos;
       }
 
       const useQueryCall = j.callExpression(j.identifier('useQuery'), [
         j.objectExpression(properties),
       ]);
+
+      // Attach TODO comments if any options couldn't be mapped
+      if (todoComments.length > 0) {
+        const leadingComments = todoComments.map((comment) => ({
+          type: 'CommentLine',
+          value: ` ${comment}`,
+        }));
+        useQueryCall.comments = leadingComments;
+      }
 
       path.replace(useQueryCall);
     });
@@ -193,6 +208,7 @@ function buildQueryFn(j, fetcherArg, queryKey) {
 
 function mapOptions(j, optionsArg) {
   const mappedProperties = [];
+  const todoComments = [];
 
   optionsArg.properties.forEach((prop) => {
     if (prop.type !== 'Property' && prop.type !== 'ObjectProperty') return;
@@ -202,12 +218,18 @@ function mapOptions(j, optionsArg) {
 
     if (mappedKey) {
       mappedProperties.push(j.property('init', j.identifier(mappedKey), prop.value));
+    } else if (SWR_OPTIONS_WITHOUT_MAPPING[keyName]) {
+      // Option has no direct mapping - add TODO comment
+      const todoMessage = SWR_OPTIONS_WITHOUT_MAPPING[keyName];
+      todoComments.push(`TODO: ${keyName} - ${todoMessage}`);
     } else if (keyName !== 'fetcher') {
+      // Unknown option - preserve it but flag for review
       mappedProperties.push(j.property('init', j.identifier(keyName), prop.value));
+      todoComments.push(`TODO: Review unknown SWR option "${keyName}" - may need manual adjustment for Tanstack Query.`);
     }
   });
 
-  return mappedProperties;
+  return { mappedProperties, todoComments };
 }
 
 function transformUseSWRConfig(j, root) {
@@ -295,6 +317,7 @@ function transformSwrConfigExport(j, root) {
       path.node.declaration.declarations.forEach((decl) => {
         if (decl.id.name === 'swrConfig' && decl.init.type === 'ObjectExpression') {
           const defaultOptions = [];
+          const todoComments = [];
 
           decl.init.properties.forEach((prop) => {
             if (prop.type !== 'Property' && prop.type !== 'ObjectProperty') return;
@@ -306,6 +329,10 @@ function transformSwrConfigExport(j, root) {
             const mappedKey = SWR_TO_TANSTACK_OPTIONS_MAP[keyName];
             if (mappedKey) {
               defaultOptions.push(j.property('init', j.identifier(mappedKey), prop.value));
+            } else if (SWR_OPTIONS_WITHOUT_MAPPING[keyName]) {
+              // Option has no direct mapping - add TODO comment
+              const todoMessage = SWR_OPTIONS_WITHOUT_MAPPING[keyName];
+              todoComments.push(`TODO: ${keyName} in swrConfig - ${todoMessage}`);
             }
           });
 
@@ -320,6 +347,15 @@ function transformSwrConfigExport(j, root) {
               ),
             ]),
           ]);
+
+          // Attach TODO comments if any options couldn't be mapped
+          if (todoComments.length > 0) {
+            const leadingComments = todoComments.map((comment) => ({
+              type: 'CommentLine',
+              value: ` ${comment}`,
+            }));
+            queryClientInit.comments = leadingComments;
+          }
 
           decl.id.name = 'queryClient';
           decl.init = queryClientInit;
